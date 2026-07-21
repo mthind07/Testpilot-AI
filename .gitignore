@@ -16,3 +16,8 @@ __pycache__/
 testpilot.db
 evaluation_results.json
 .DS_Store
+
+testpilot.db
+testpilot.db-journal
+testpilot.db-shm
+testpilot.db-wal
