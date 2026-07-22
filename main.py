@@ -3,7 +3,10 @@
 #Milestone 2: Code is divided into modules, report output follows a validated structure & reports are saved in SQLite
 #agent is still read-only & can't edit project files
 
+#Milestone 3: 
+
 import sys
+import argparse
 
 from strands import Agent
 
@@ -13,13 +16,15 @@ from agent_tools import (
     reset_test_cache,
     run_python_tests,
 )
-from model import DiagnosticReport, create_model
+from model import ( DiagnosticReport, RepairPlan, create_model,)
 from storage import (
     DATABASE_PATH,
     initialize_database,
     list_recent_runs,
     save_report,
 )
+
+from proposal_manager import (apply_proposal, get_proposal_diff, rollback_proposal, save_proposal, )
 
 
 SYSTEM_PROMPT = """
@@ -42,6 +47,26 @@ Important rules:
 - Stop after producing the structured report.
 """
 
+PROPOSAL_TASK = """
+Analyze this Python project and prepare an exact repair proposal.
+
+Required process:
+1. List the project files.
+2. Read the relevant source and test files.
+3. Run pytest exactly once.
+4. Identify source-code defects and test defects.
+5. Produce a RepairPlan containing exact replacements.
+
+Rules:
+- Do not claim that any file was modified.
+- Do not use Markdown fences inside original_text or replacement_text.
+- original_text must match the existing file exactly.
+- Include enough surrounding text to make every replacement unique.
+- Combine related changes when appropriate.
+- Do not propose changes to TestPilot's infrastructure files.
+- Only propose changes inside sample_app or its related tests.
+- Stop after producing the RepairPlan.
+"""
 
 DIAGNOSTIC_TASK = """
 Analyze this Python project.
@@ -147,16 +172,200 @@ def run_diagnostic() -> None:
     print(f"Database: {DATABASE_PATH.name}")
 
 
+def build_agent() -> Agent:
+    """Create the read-only TestPilot agent."""
+
+    return Agent(
+        model=create_model(),
+        tools=[
+            list_project_files,
+            read_project_file,
+            run_python_tests,
+        ],
+        system_prompt=SYSTEM_PROMPT,
+        callback_handler=None,
+    )
+
+
+def create_repair_proposal() -> None:
+    """Generate and save a repair proposal without applying it."""
+
+    print("\n========== TESTPILOT REPAIR PROPOSAL ==========\n")
+    print("Analyzing the project...")
+    print("No source files will be modified.\n")
+
+    initialize_database()
+    reset_test_cache()
+
+    agent = build_agent()
+
+    try:
+        result = agent(
+            PROPOSAL_TASK,
+            structured_output_model=RepairPlan,
+            limits={
+                "turns": 10,
+                "output_tokens": 5000,
+                "total_tokens": 25_000,
+            },
+        )
+
+    except Exception as error:
+        print("Proposal generation failed.")
+        print(f"{type(error).__name__}: {error}")
+        raise SystemExit(1) from error
+
+    plan = result.structured_output
+
+    if plan is None:
+        print("Gemini did not produce a repair plan.")
+        raise SystemExit(1)
+
+    #save the diagnostic part in Milestone 2's database
+    diagnostic_run_id = save_report(
+        report=plan.diagnostic,
+        stop_reason=str(result.stop_reason),
+    )
+
+    try:
+        proposal_id = save_proposal(plan)
+
+    except Exception as error:
+        print("The proposed changes failed safety validation.")
+        print(f"{type(error).__name__}: {error}")
+        raise SystemExit(1) from error
+
+    print("\n========== DIAGNOSTIC ==========\n")
+    print(plan.diagnostic.model_dump_json(indent=2))
+
+    print("\n========== PROPOSED CHANGES ==========\n")
+    print(get_proposal_diff(proposal_id))
+
+    print("\n========== APPROVAL INFORMATION ==========\n")
+    print(f"Diagnostic run: #{diagnostic_run_id}")
+    print(f"Proposal ID: {proposal_id}")
+    print("Status: pending")
+    print("No project files were changed.")
+    print("\nTo review and apply it, run:")
+    print(f"uv run main.py --apply {proposal_id}")
+
+
+def apply_saved_proposal(proposal_id: str) -> None:
+    """Show a proposal and require explicit human approval."""
+
+    print("\n========== PROPOSAL REVIEW ==========\n")
+    print(get_proposal_diff(proposal_id))
+
+    print("\nThis operation will modify project files.")
+    confirmation = input(
+        "Type APPLY exactly to approve these changes: "
+    )
+
+    if confirmation != "APPLY":
+        print("Approval was not provided. Nothing was changed.")
+        return
+
+    try:
+        changed_files = apply_proposal(proposal_id)
+
+    except Exception as error:
+        print("The proposal could not be applied.")
+        print(f"{type(error).__name__}: {error}")
+        raise SystemExit(1) from error
+
+    print("\nChanged files:")
+
+    for file_path in changed_files:
+        print(f"- {file_path}")
+
+    print("\nRerunning the test suite...\n")
+
+    #clear Milestone 2's test cache so this is a new test run
+    reset_test_cache()
+    test_output = run_python_tests()
+
+    print(test_output)
+
+    if "Pytest exit code: 0" in test_output:
+        print("\nVerification successful: all tests passed.")
+    else:
+        print("\nSome tests are still failing.")
+        print("Review the output carefully.")
+        print("To restore the original files, run:")
+        print(f"uv run main.py --rollback {proposal_id}")
+
+
+def rollback_saved_proposal(proposal_id: str) -> None:
+    """Restore files from their Milestone 3 backups."""
+
+    try:
+        restored_files = rollback_proposal(proposal_id)
+
+    except Exception as error:
+        print("Rollback failed.")
+        print(f"{type(error).__name__}: {error}")
+        raise SystemExit(1) from error
+
+    print("\nRestored files:")
+
+    for file_path in restored_files:
+        print(f"- {file_path}")
+
+    print("\nRollback complete.")
+
+
 def main() -> None:
-    """Choose between running TestPilot and viewing its history."""
+    """Run the requested TestPilot operation."""
+
+    parser = argparse.ArgumentParser(
+        description="TestPilot AI"
+    )
+
+    operation = parser.add_mutually_exclusive_group()
+
+    operation.add_argument(
+        "--history",
+        action="store_true",
+        help="Display saved diagnostic runs.",
+    )
+
+    operation.add_argument(
+        "--propose",
+        action="store_true",
+        help="Generate a safe repair proposal.",
+    )
+
+    operation.add_argument(
+        "--apply",
+        metavar="PROPOSAL_ID",
+        help="Review and apply a saved proposal.",
+    )
+
+    operation.add_argument(
+        "--rollback",
+        metavar="PROPOSAL_ID",
+        help="Restore files changed by a proposal.",
+    )
+
+    arguments = parser.parse_args()
 
     initialize_database()
 
-    if "--history" in sys.argv:
+    if arguments.history:
         display_history()
-        return
 
-    run_diagnostic()
+    elif arguments.propose:
+        create_repair_proposal()
+
+    elif arguments.apply:
+        apply_saved_proposal(arguments.apply)
+
+    elif arguments.rollback:
+        rollback_saved_proposal(arguments.rollback)
+
+    else:
+        #preserve Milestone 2's normal diagnostic mode.
+        run_diagnostic()
 
 
 if __name__ == "__main__":

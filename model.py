@@ -42,6 +42,41 @@ class DiagnosticReport(BaseModel):
         description="Tests that should be rerun after the problems are corrected."
     )
 
+class FileChange(BaseModel):
+    """One exact change proposed for a project file."""
+
+    file_path: str = Field(
+        description="Path to the file relative to the project root."
+    )
+
+    reason: str = Field(
+        description="Why this change is necessary."
+    )
+
+    original_text: str = Field(
+        min_length=1,
+        description=(
+            "Exact text currently inside the file. "
+            "It must match the file exactly."
+        ),
+    )
+
+    replacement_text: str = Field(
+        description="Text that should replace original_text."
+    )
+
+
+class RepairPlan(BaseModel):
+    """A structured repair plan that requires human approval."""
+
+    diagnostic: DiagnosticReport = Field(
+        description="The diagnostic report supporting these changes."
+    )
+
+    changes: list[FileChange] = Field(
+        min_length=1,
+        description="Exact proposed file changes."
+    )
 
 def create_model() -> GeminiModel:
     """Create and return the Gemini model used by TestPilot."""
