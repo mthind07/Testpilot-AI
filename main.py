@@ -1,9 +1,9 @@
-#Milestone 1: agent inspected code and ran tests
+#Milestone 1: Agent inspected code and ran tests
 
 #Milestone 2: Code is divided into modules, report output follows a validated structure & reports are saved in SQLite
 #agent is still read-only & can't edit project files
 
-#Milestone 3: 
+#Milestone 3: Creates safe fix proposals, requires approval, verifies fixes, and supports rollback 
 
 import sys
 import argparse
