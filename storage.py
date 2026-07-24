@@ -1,4 +1,4 @@
-#creates the local SQLite database, saves every structured diagnostic report & allows previous runs to be viewed later
+#SQLite persistence for structured TestPilot diagnostic reports
 
 import sqlite3
 from datetime import datetime, timezone
@@ -13,7 +13,7 @@ DATABASE_PATH = Path(__file__).resolve().parent / "testpilot.db"
 def initialize_database(
     database_path: Path = DATABASE_PATH,
 ) -> None:
-    """Create the diagnostic_runs table if it does not already exist."""
+    """Create the diagnostic_runs table when necessary."""
 
     with sqlite3.connect(database_path) as connection:
         connection.execute(
@@ -36,7 +36,7 @@ def save_report(
     stop_reason: str,
     database_path: Path = DATABASE_PATH,
 ) -> int:
-    """Save one report and return its database ID."""
+    """Save one diagnostic report and return its database ID."""
 
     created_at = datetime.now(timezone.utc).isoformat()
 
@@ -62,7 +62,6 @@ def save_report(
                 report.model_dump_json(),
             ),
         )
-
         return int(cursor.lastrowid)
 
 
@@ -74,7 +73,6 @@ def list_recent_runs(
 
     with sqlite3.connect(database_path) as connection:
         connection.row_factory = sqlite3.Row
-
         rows = connection.execute(
             """
             SELECT

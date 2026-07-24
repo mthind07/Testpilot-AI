@@ -1,4 +1,4 @@
-#Contains the safe tools available to the agent, the tools can read files and run tests & the tools cannot edit or delete anything
+#read-only project inspection and pytest tools used by TestPilot
 
 import subprocess
 import sys
@@ -7,10 +7,8 @@ from pathlib import Path
 from strands import tool
 
 
-#folder containing this file is the project root
 PROJECT_ROOT = Path(__file__).resolve().parent
 
-#folders the agent shouldnt inspect
 IGNORED_DIRECTORIES = {
     ".git",
     ".venv",
@@ -20,14 +18,12 @@ IGNORED_DIRECTORIES = {
     ".testpilot_proposals",
 }
 
-#files that should be ignored
 IGNORED_FILES = {
     ".env",
     "testpilot.db",
     "evaluation_results.json",
 }
 
-#only allowed extensions
 ALLOWED_EXTENSIONS = {
     ".py",
     ".toml",
@@ -38,32 +34,32 @@ ALLOWED_EXTENSIONS = {
     ".yml",
 }
 
-#stores the test output after the first test run
-#prevents the agent from repeatedly running pytest
 _cached_test_output: str | None = None
 
 
 def reset_test_cache() -> None:
-    """Clear the pytest cache before a new TestPilot diagnostic run."""
+    """Clear cached pytest output before a new diagnostic run."""
 
     global _cached_test_output
     _cached_test_output = None
 
 
-def _safe_project_path(relative_path: str) -> Path:
-    """Return a safe path located inside the project."""
+def _safe_project_path(
+    relative_path: str,
+    project_root: Path = PROJECT_ROOT,
+) -> Path:
+    """Return a safe path located inside project_root."""
 
-    requested_path = (PROJECT_ROOT / relative_path).resolve()
+    root = project_root.resolve()
+    requested_path = (root / relative_path).resolve()
 
-    #confirm that the resolved path is still inside the project.
     try:
-        relative_to_project = requested_path.relative_to(PROJECT_ROOT)
+        relative_to_project = requested_path.relative_to(root)
     except ValueError as error:
         raise ValueError(
             "Access denied: path is outside the project."
         ) from error
 
-    #block ignored folders even if the agent requests one directly.
     if any(
         part in IGNORED_DIRECTORIES
         for part in relative_to_project.parts
@@ -72,7 +68,6 @@ def _safe_project_path(relative_path: str) -> Path:
             "Access denied: this directory cannot be inspected."
         )
 
-    #block ignored files.
     if requested_path.name in IGNORED_FILES:
         raise ValueError(
             "Access denied: this file cannot be inspected."
@@ -81,111 +76,124 @@ def _safe_project_path(relative_path: str) -> Path:
     return requested_path
 
 
-@tool
-def list_project_files() -> str:
-    """List the readable files inside the current project."""
+def collect_project_files(
+    project_root: Path = PROJECT_ROOT,
+) -> list[str]:
+    """Return readable project paths for any supplied project root."""
 
+    root = project_root.resolve()
     project_files: list[str] = []
 
-    for path in sorted(PROJECT_ROOT.rglob("*")):
+    for path in sorted(root.rglob("*")):
         if not path.is_file():
             continue
 
-        relative_path = path.relative_to(PROJECT_ROOT)
-
-        if any(part in IGNORED_DIRECTORIES for part in relative_path.parts):
+        relative_path = path.relative_to(root)
+        if any(
+            part in IGNORED_DIRECTORIES
+            for part in relative_path.parts
+        ):
             continue
-
         if path.name in IGNORED_FILES:
             continue
-
         if path.suffix not in ALLOWED_EXTENSIONS:
             continue
 
-        project_files.append(str(relative_path))
+        project_files.append(relative_path.as_posix())
 
-    if not project_files:
+    return project_files
+
+
+def read_project_text(
+    relative_path: str,
+    project_root: Path = PROJECT_ROOT,
+) -> str:
+    """Read one safe UTF-8 project file."""
+
+    path = _safe_project_path(relative_path, project_root)
+
+    if not path.exists():
+        raise FileNotFoundError(f"File not found: {relative_path}")
+    if not path.is_file():
+        raise ValueError(f"Not a file: {relative_path}")
+    if path.suffix not in ALLOWED_EXTENSIONS:
+        raise ValueError(f"Unsupported file type: {relative_path}")
+    if path.stat().st_size > 100_000:
+        raise ValueError(f"File is too large to read: {relative_path}")
+
+    return path.read_text(encoding="utf-8")
+
+
+def execute_python_tests(
+    project_root: Path = PROJECT_ROOT,
+    timeout_seconds: int = 30,
+) -> tuple[int, str]:
+    """Run pytest once and return its exit code and complete output."""
+
+    root = project_root.resolve()
+
+    try:
+        completed_process = subprocess.run(
+            [sys.executable, "-m", "pytest", "-q"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return (
+            124,
+            f"Pytest timed out after {timeout_seconds} seconds.",
+        )
+    except Exception as error:
+        return (
+            125,
+            f"Unable to run pytest: {type(error).__name__}: {error}",
+        )
+
+    output_parts = [
+        completed_process.stdout.strip(),
+        completed_process.stderr.strip(),
+    ]
+    output = "\n\n".join(part for part in output_parts if part)
+    return completed_process.returncode, output
+
+
+@tool
+def list_project_files() -> str:
+    """List readable files inside the current TestPilot project."""
+
+    paths = collect_project_files(PROJECT_ROOT)
+    if not paths:
         return "No readable project files were found."
-
-    return "\n".join(project_files)
+    return "\n".join(paths)
 
 
 @tool
 def read_project_file(relative_path: str) -> str:
-    """Read one safe text file from the project.
-
-    Args:
-        relative_path: File path relative to the project root.
-    """
-
-    path = _safe_project_path(relative_path)
-
-    if not path.exists():
-        return f"File not found: {relative_path}"
-
-    if not path.is_file():
-        return f"Not a file: {relative_path}"
-
-    if path.name in IGNORED_FILES:
-        return f"Access denied: {relative_path}"
-
-    if path.suffix not in ALLOWED_EXTENSIONS:
-        return f"Unsupported file type: {relative_path}"
-
-    #avoids sending an extremely large file to Gemini
-    if path.stat().st_size > 100_000:
-        return f"File is too large to read: {relative_path}"
+    """Read one safe text file relative to the project root."""
 
     try:
-        return path.read_text(encoding="utf-8")
-    except UnicodeDecodeError:
-        return f"Unable to decode file as UTF-8: {relative_path}"
+        return read_project_text(relative_path, PROJECT_ROOT)
+    except (FileNotFoundError, UnicodeDecodeError, ValueError) as error:
+        return str(error)
 
 
 @tool
 def run_python_tests() -> str:
-    """Run the Python test suite once and return the pytest evidence."""
+    """Run the current project's pytest suite once."""
 
     global _cached_test_output
 
-    #if Gemini requests pytest again, return the previous result
     if _cached_test_output is not None:
         return (
             "Tests were already run during this diagnostic session.\n\n"
             + _cached_test_output
         )
 
-    try:
-        completed_process = subprocess.run(
-            [sys.executable, "-m", "pytest", "-q"],
-            cwd=PROJECT_ROOT,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
-
-        output_parts = [
-            f"Pytest exit code: {completed_process.returncode}",
-            completed_process.stdout.strip(),
-        ]
-
-        if completed_process.stderr.strip():
-            output_parts.append(completed_process.stderr.strip())
-
-        _cached_test_output = "\n\n".join(
-            part for part in output_parts if part
-        )
-
-    except subprocess.TimeoutExpired:
-        _cached_test_output = (
-            "Pytest timed out after 30 seconds. "
-            "The tests may be hanging."
-        )
-
-    except Exception as error:
-        _cached_test_output = (
-            f"Unable to run pytest: {type(error).__name__}: {error}"
-        )
-
+    exit_code, output = execute_python_tests(PROJECT_ROOT)
+    _cached_test_output = (
+        f"Pytest exit code: {exit_code}\n\n{output}".rstrip()
+    )
     return _cached_test_output
