@@ -8,6 +8,7 @@ dependencies = [
     "pydantic>=2.13.4",
     "pytest==9.1.1",
     "strands-agents[gemini]==1.48.0",
+    "streamlit>=1.60.0",
 ]
 
 [tool.pytest.ini_options]

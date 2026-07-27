@@ -21,3 +21,7 @@ testpilot.db
 testpilot.db-journal
 testpilot.db-shm
 testpilot.db-wal
+
+#add streamlit
+.streamlit/secrets.toml
+
