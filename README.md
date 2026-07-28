@@ -1,21 +1,63 @@
 # TestPilot AI
 
-TestPilot AI is an agentic Python software-testing and debugging platform built with Python, uv, Strands Agents and Gemini. Gemini was chosen over other models such as AWS due to to his accesible and free tiers
+[![TestPilot CI](https://github.com/mthind07/Testpilot-AI/actions/workflows/ci.yml/badge.svg)](https://github.com/mthind07/Testpilot-AI/actions/workflows/ci.yml)
 
-## Current milestone
+A safety-first, agentic software testing and debugging platform that
+investigates failing Python tests, proposes validated repairs, and keeps
+developers in control of every source-code change.
 
-Milestone 1 implements a safe diagnostic agent that can:
+## What TestPilot does
 
-- Inspect project files
-- Read Python source code and tests
-- Run pytest
-- Analyze failing tests
-- Explain root causes
-- Propose corrections
+TestPilot combines specialized AI agents with deterministic validation:
 
-The agent can't edit source code in this milestone
+1. Runs the project's pytest suite
+2. Collects trusted failure evidence
+3. Plans an investigation
+4. Diagnoses root causes
+5. Produces exact code changes
+6. Validates the proposed diff
+7. Performs an independent review
+8. Saves a pending proposal
+9. Waits for explicit human approval
+10. Applies the repair and reruns tests
+11. Supports rollback when an applied repair is unsuccessful
 
-## Demo project
+## Features
+- Structured diagnostic reports
+- Planner, debugger, validator, and reviewer agents
+- Exact unified-diff previews
+- Human-in-the-loop repair approval
+- Protected paths and traversal prevention
+- Automatic backups and rollback
+- SQLite diagnostic history
+- Streamlit operations dashboard
+- Deterministic release evaluations
+- GitHub Actions CI and automated releases
 
-The calculator application currently contains deliberate bugs. These bugs are included to demonstrate that TestPilot can discover and explain test failures
+## Technology
+- Python 3.12
+- uv
+- Strands Agents
+- Google Gemini
+- Pydantic
+- pytest
+- SQLite
+- Streamlit
+- GitHub Actions
+
+## Architecture
+
+```mermaid
+flowchart LR
+    A[Pytest evidence] --> B[Planner agent]
+    B --> C[Debugger agent]
+    C --> D[Deterministic validator]
+    D --> E[Reviewer agent]
+    E --> F[Pending proposal]
+    F --> G{Human decision}
+    G -->|APPLY| H[Backup and apply]
+    H --> I[Rerun pytest]
+    I -->|Pass| J[Verified repair]
+    I -->|Fail| K[Rollback available]
+    G -->|Reject| L[No files changed]
 

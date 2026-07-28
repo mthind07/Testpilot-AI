@@ -25,3 +25,7 @@ testpilot.db-wal
 #add streamlit
 .streamlit/secrets.toml
 
+#Test coverage output
+.coverage
+htmlcov/
+
