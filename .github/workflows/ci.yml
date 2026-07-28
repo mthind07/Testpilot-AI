@@ -1,0 +1,55 @@
+name: TestPilot CI
+
+#run the release gates for changes headed toward main
+on:
+  push:
+    branches:
+      - main
+      - "milestone-*"
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+#CI only needs permission to read the repository
+permissions:
+  contents: read
+
+jobs:
+  test-and-evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.32"
+          enable-cache: true
+
+      - name: Install Python 3.12
+        run: uv python install 3.12
+
+      - name: Install the locked project dependencies
+        run: uv sync --locked
+
+      #CI must not need GEMINI_API_KEY
+      #agent calls should be mocked by the tests
+      - name: Run the complete test suite
+        run: uv run pytest -q
+
+      - name: Run TestPilot release evaluations
+        run: uv run python evaluation.py
+
+      #preserve the JSON report even when an evaluation fails
+      - name: Upload the evaluation report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: testpilot-evaluation-${{ github.run_number }}
+          path: evaluation_results.json
+          if-no-files-found: warn
+          retention-days: 30

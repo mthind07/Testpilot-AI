@@ -1,0 +1,49 @@
+name: TestPilot Release
+
+#pushing a tag such as v1.0.0 starts the final release
+on:
+  push:
+    tags:
+      - "v*"
+
+#write access is needed only to create the GitHub Release
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out the tagged source
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.32"
+          enable-cache: true
+
+      - name: Install Python 3.12
+        run: uv python install 3.12
+
+      - name: Install the locked project dependencies
+        run: uv sync --locked
+
+      #never publish a release with broken tests
+      - name: Run tests
+        run: uv run pytest -q
+
+      - name: Run release evaluations
+        run: uv run python evaluation.py
+
+      #GitHub-hosted runners include the GitHub CLI
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$GITHUB_REF_NAME"
+          evaluation_results.json
+          --title "TestPilot AI $GITHUB_REF_NAME"
+          --generate-notes
