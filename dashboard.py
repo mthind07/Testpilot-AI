@@ -31,6 +31,11 @@ from storage import initialize_database, list_recent_runs
 #Milestone 5 entry point: runs the complete agent workflow
 from workflow import run_workflow
 
+st.info(
+    "Demo Mode: This version contains one intentional calculator bug. "
+    "Run TestPilot to watch it detect, propose, apply, verify, and "
+    "roll back a repair."
+)
 
 def run_test_suite(
     project_root: Path = PROJECT_ROOT,

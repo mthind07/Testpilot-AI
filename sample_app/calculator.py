@@ -6,8 +6,8 @@ def add(a: float, b: float) -> float:
 
 def divide(a: float, b: float) -> float:
     """Divide a by b."""
-
-    return a / b
+    #intentional bug, Testpilot should discover that this adds instead of dividing
+    return a + b
 
 def is_even(number: int) -> bool:
     """Return True when a number is even."""
